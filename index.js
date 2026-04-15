@@ -1,18 +1,60 @@
 // index.js
 // ─────────────────────────────────────────────────────────
-// Entry point: starts the daily code cron scheduler.
+// Entry point: Express server + daily code cron scheduler.
 //
 // Cron schedule: every day at 00:00 IST (Asia/Kolkata)
 // On startup: ensures a code exists for today immediately.
 // ─────────────────────────────────────────────────────────
 
+require('dotenv').config();
+
+const path = require('path');
+const express = require('express');
+const session = require('express-session');
 const cron = require('node-cron');
 const { getTodayCode, rotateCode } = require('./services/dailyCode');
 
+// ─── Express App Setup ───────────────────────────────────
+const app = express();
+const PORT = process.env.PORT || 3000;
+
+// Body parsing
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
+
+// Session middleware
+app.use(session({
+  secret: process.env.SESSION_SECRET || 'change-me-in-production',
+  resave: false,
+  saveUninitialized: false,
+  cookie: {
+    maxAge: 24 * 60 * 60 * 1000, // 24 hours
+    httpOnly: true,
+    secure: false, // Set to true if behind HTTPS
+  },
+}));
+
+// Static files
+app.use(express.static(path.join(__dirname, 'public')));
+
+// ─── Routes ──────────────────────────────────────────────
+const authRoutes = require('./routes/auth');
+const apiRoutes = require('./routes/api');
+const webhookRoutes = require('./routes/webhook');
+
+app.use('/api/auth', authRoutes);
+app.use('/api/code', apiRoutes);
+app.use('/webhook', webhookRoutes);
+
+// Root redirect → login page
+app.get('/', (req, res) => {
+  res.redirect('/login.html');
+});
+
+// ─── Cron Job: Rotate code at midnight IST ───────────────
 const CRON_SCHEDULE = '0 0 * * *'; // midnight every day
 const CRON_TIMEZONE = 'Asia/Kolkata';
 
-// ─── Cron Job: Rotate code at midnight IST ───────────────
 const task = cron.schedule(
   CRON_SCHEDULE,
   async () => {
@@ -44,5 +86,10 @@ const task = cron.schedule(
     console.error(`[Startup] ❌ Failed to get/create today's code:`, error.message);
   }
 
-  console.log(`[Startup] Service is running. Waiting for midnight rotation...\n`);
+  // Start Express server
+  app.listen(PORT, () => {
+    console.log(`[Server] 🌐 Admin dashboard: http://localhost:${PORT}`);
+    console.log(`[Server] 📱 WhatsApp webhook: http://localhost:${PORT}/webhook`);
+    console.log(`[Startup] Service is running. Waiting for midnight rotation...\n`);
+  });
 })();

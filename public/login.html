@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="Admin login for WhatsApp Daily Code System">
+  <title>Admin Login — Daily Code</title>
+  <link rel="stylesheet" href="/css/styles.css">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🔐</text></svg>">
+</head>
+<body>
+  <div class="container login-page">
+    <div class="login-card" id="loginCard">
+      <!-- Icon -->
+      <div class="login-header">
+        <div class="login-icon">🔑</div>
+        <h1 class="login-title">Admin Portal</h1>
+        <p class="login-subtitle">Sign in to manage daily access codes</p>
+      </div>
+
+      <!-- Alert -->
+      <div class="alert alert-error" id="alertError"></div>
+
+      <!-- Form -->
+      <form id="loginForm" autocomplete="off">
+        <div class="form-group">
+          <label class="form-label" for="username">Username</label>
+          <input
+            class="form-input"
+            type="text"
+            id="username"
+            name="username"
+            placeholder="Enter your username"
+            required
+            autofocus
+          >
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="password">Password</label>
+          <input
+            class="form-input"
+            type="password"
+            id="password"
+            name="password"
+            placeholder="Enter your password"
+            required
+          >
+        </div>
+        <button type="submit" class="btn btn-primary" id="loginBtn">
+          <span id="loginText">Sign In</span>
+          <div class="spinner" id="loginSpinner" style="display:none;"></div>
+        </button>
+      </form>
+    </div>
+  </div>
+
+  <script>
+    // ─── Check if already authenticated ────────────────────
+    (async () => {
+      try {
+        const res = await fetch('/api/auth/check');
+        const data = await res.json();
+        if (data.authenticated) {
+          window.location.href = '/dashboard.html';
+        }
+      } catch (e) { /* ignore */ }
+    })();
+
+    // ─── Handle Login ──────────────────────────────────────
+    const form = document.getElementById('loginForm');
+    const alert = document.getElementById('alertError');
+    const loginBtn = document.getElementById('loginBtn');
+    const loginText = document.getElementById('loginText');
+    const loginSpinner = document.getElementById('loginSpinner');
+
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      alert.classList.remove('show');
+
+      const username = document.getElementById('username').value.trim();
+      const password = document.getElementById('password').value;
+
+      if (!username || !password) {
+        showError('Please fill in all fields.');
+        return;
+      }
+
+      // Show loading state
+      loginBtn.disabled = true;
+      loginText.style.display = 'none';
+      loginSpinner.style.display = 'block';
+
+      try {
+        const res = await fetch('/api/auth/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ username, password }),
+        });
+
+        const data = await res.json();
+
+        if (res.ok && data.success) {
+          window.location.href = '/dashboard.html';
+        } else {
+          showError(data.error || 'Login failed.');
+        }
+      } catch (err) {
+        showError('Network error. Please try again.');
+      } finally {
+        loginBtn.disabled = false;
+        loginText.style.display = 'inline';
+        loginSpinner.style.display = 'none';
+      }
+    });
+
+    function showError(message) {
+      alert.textContent = message;
+      alert.classList.add('show');
+    }
+  </script>
+</body>
+</html>

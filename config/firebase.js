@@ -16,7 +16,6 @@
 //
 // ─────────────────────────────────────────────────────────
 
-// Placeholder — replace with your Firebase initialization
 const admin = require('firebase-admin');
 
 
