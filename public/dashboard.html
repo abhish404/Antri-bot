@@ -4,410 +4,121 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta name="description" content="Admin dashboard — Daily venue access code with QR & queue management">
-  <title>Dashboard — Daily Code</title>
-  <link rel="stylesheet" href="/css/styles.css">
+  <meta name="description" content="Admin queue dashboard — manage tokens, track queue status">
+  <title>Queue Dashboard</title>
+  <link rel="stylesheet" href="/css/dashboard.css">
   <link rel="icon"
-    href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📱</text></svg>">
-  <!-- QR Code library (client-side) -->
+    href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎫</text></svg>">
   <script src="https://cdn.jsdelivr.net/npm/qrcode/build/qrcode.min.js"></script>
 </head>
 
-<body>
-  <div class="container dashboard">
+<body class="dash-body">
 
-    <!-- ─── Top Bar ──────────────────────────────────── -->
-    <header class="topbar">
-      <div class="topbar-brand">
-        <div class="topbar-logo">📱</div>
-        <span class="topbar-title">Daily Code Admin</span>
+  <!-- ─── Top Bar ──────────────────────────────────────── -->
+  <header class="dash-topbar">
+    <div class="dash-topbar-left">
+      <span class="dash-topbar-title">Queue Dashboard</span>
+      <span class="dash-topbar-date" id="dashDate">—</span>
+    </div>
+    <div class="dash-topbar-right">
+      <span class="dash-topbar-indicator">
+        <span class="dash-topbar-dot"></span>
+        Live
+      </span>
+      <button class="dash-btn dash-btn-danger" id="dashLogoutBtn">Logout</button>
+    </div>
+  </header>
+
+  <!-- ─── Main Content ─────────────────────────────────── -->
+  <main class="dash-main">
+
+    <!-- Stats Row -->
+    <div class="dash-stats">
+      <div class="dash-stat-card stat-total">
+        <div class="dash-stat-label">Total Tokens</div>
+        <div class="dash-stat-value" id="statTotal">0</div>
       </div>
-      <div class="topbar-actions">
-        <button class="btn btn-ghost" id="refreshBtn" title="Refresh">↻ Refresh</button>
-        <button class="btn btn-danger" id="logoutBtn">Logout</button>
+      <div class="dash-stat-card stat-treated">
+        <div class="dash-stat-label">Treated</div>
+        <div class="dash-stat-value" id="statTreated">0</div>
       </div>
-    </header>
+      <div class="dash-stat-card stat-waiting">
+        <div class="dash-stat-label">Waiting</div>
+        <div class="dash-stat-value" id="statWaiting">0</div>
+      </div>
+    </div>
 
-    <!-- ─── Main Content ─────────────────────────────── -->
-    <main class="main">
-
-      <!-- Code Card -->
-      <section class="code-card" id="codeCard">
-        <p class="code-date" id="codeDate">Loading...</p>
-        <h1 class="code-heading">Today's Access Code</h1>
-
-        <div class="qr-wrapper" id="qrWrapper">
-          <div class="qr-loading" id="qrLoading">
-            <div class="spinner"></div>
-          </div>
-          <canvas id="qrCanvas" style="display:none;"></canvas>
+    <!-- QR Inline -->
+    <div class="dash-qr-section">
+      <div class="dash-qr-canvas-wrap">
+        <div id="dashQrLoading" style="width:80px;height:80px;display:flex;align-items:center;justify-content:center;">
+          <span style="font-size:0.7rem;color:#9ca3af;">Loading...</span>
         </div>
+        <canvas id="dashQrCanvas" style="display:none;"></canvas>
+      </div>
+      <div class="dash-qr-info">
+        <div class="dash-qr-label">Today's Passcode</div>
+        <div class="dash-qr-code" id="dashQrCode">------</div>
+        <div class="dash-qr-hint">Scan QR → opens WhatsApp with passcode</div>
+      </div>
+      <div class="dash-qr-actions">
+        <button class="dash-btn" id="dashCopyBtn">Copy</button>
+      </div>
+    </div>
 
-        <p class="code-display" id="codeDisplay">------</p>
-        <p class="code-hint">Scan QR → opens WhatsApp with passcode pre-filled</p>
-
-        <!-- <div class="code-actions">
-          <button class="btn btn-secondary" id="rotateBtn">🔄 Rotate Code</button>
-        </div> -->
-      </section>
-
-      <!-- Queue Card -->
-      <section class="queue-card" id="queueCard">
-        <div class="queue-header">
-          <h2 class="queue-title">🎫 Today's Queue</h2>
-          <div class="queue-stats">
-            <span class="queue-stat" id="queueCount">
-              <span class="queue-stat-number">0</span>
-              <span class="queue-stat-label">Tokens Issued</span>
-            </span>
-          </div>
+    <!-- Queue Section -->
+    <section class="dash-queue-section">
+      <div class="dash-queue-header">
+        <div class="dash-queue-header-left">
+          <span class="dash-queue-title">Queue</span>
+          <span class="dash-queue-count" id="dashQueueCount">0 tokens</span>
         </div>
+        <button class="dash-btn dash-btn-danger" id="dashResetBtn">Reset Queue</button>
+      </div>
 
-        <div class="queue-table-wrap" id="queueTableWrap">
-          <div class="queue-empty" id="queueEmpty">
-            <span class="queue-empty-icon">🎫</span>
-            <p>No tokens issued yet today</p>
-            <p class="queue-empty-hint">Tokens appear here when users scan the QR code</p>
-          </div>
-          <table class="queue-table" id="queueTable" style="display:none;">
-            <thead>
-              <tr>
-                <th>#</th>
-                <th>Phone</th>
-                <th>Time</th>
-              </tr>
-            </thead>
-            <tbody id="queueBody"></tbody>
-          </table>
-        </div>
+      <!-- Empty State -->
+      <div class="dash-empty" id="dashQueueEmpty">
+        <span class="dash-empty-icon">🎫</span>
+        <p class="dash-empty-text">No tokens issued yet today</p>
+        <p class="dash-empty-hint">Tokens appear here when customers scan the QR code</p>
+      </div>
 
-        <div class="queue-actions">
-          <button class="btn btn-danger btn-sm" id="resetQueueBtn">🗑️ Reset Queue</button>
-        </div>
-      </section>
+      <!-- Table -->
+      <div class="dash-table-wrap">
+        <table class="dash-table" id="dashQueueTable" style="display:none;">
+          <thead>
+            <tr>
+              <th style="width:70px;">#</th>
+              <th>Name</th>
+              <th>Phone Number</th>
+              <th style="width:100px;">Time</th>
+              <th style="width:180px;">Status</th>
+            </tr>
+          </thead>
+          <tbody id="dashQueueBody"></tbody>
+        </table>
+      </div>
+    </section>
 
-      <!-- History Card -->
-      <section class="history-card" id="historyCard">
-        <h2 class="history-title">📋 Code History (Last 7 Days)</h2>
-        <ul class="history-list" id="historyList">
-          <li class="history-item">
-            <span class="history-date">Loading...</span>
-          </li>
-        </ul>
-      </section>
+  </main>
 
-    </main>
+  <!-- ─── Retrieve Reason Modal ───────────────────────── -->
+  <div class="dash-modal-overlay" id="dashModalOverlay">
+    <div class="dash-modal">
+      <div class="dash-modal-title">Retrieve Token <span id="dashModalToken"></span></div>
+      <div class="dash-modal-desc">Provide a reason to revert this token back to waiting.</div>
+      <textarea class="dash-modal-input" id="dashModalInput" placeholder="Reason for retrieval..." rows="3"></textarea>
+      <div class="dash-modal-actions">
+        <button class="dash-modal-cancel" id="dashModalCancel">Cancel</button>
+        <button class="dash-modal-confirm" id="dashModalConfirm" disabled>Confirm Retrieve</button>
+      </div>
+    </div>
   </div>
 
-  <!-- Toast -->
-  <div class="toast" id="toast"></div>
+  <!-- ─── Toast ───────────────────────────────────────── -->
+  <div class="dash-toast" id="dashToast"></div>
 
-  <script>
-    // ─── State ─────────────────────────────────────────────
-    let waNumber = '';
-
-    // ─── Auth Guard ────────────────────────────────────────
-    (async () => {
-      try {
-        const res = await fetch('/api/auth/check');
-        const data = await res.json();
-        if (!data.authenticated) {
-          window.location.href = '/login.html';
-          return;
-        }
-      } catch (e) {
-        window.location.href = '/login.html';
-        return;
-      }
-
-      // Load config (bot number), then data
-      await loadConfig();
-      await loadTodayCode();
-      await loadHistory();
-      await loadQueue();
-
-      // Auto-refresh queue every 15 seconds
-      setInterval(loadQueue, 15000);
-    })();
-
-    // ─── DOM References ────────────────────────────────────
-    const codeDate = document.getElementById('codeDate');
-    const codeDisplay = document.getElementById('codeDisplay');
-    const qrCanvas = document.getElementById('qrCanvas');
-    const qrLoading = document.getElementById('qrLoading');
-    const historyList = document.getElementById('historyList');
-    const rotateBtn = document.getElementById('rotateBtn');
-    const refreshBtn = document.getElementById('refreshBtn');
-    const logoutBtn = document.getElementById('logoutBtn');
-    const toast = document.getElementById('toast');
-    const queueBody = document.getElementById('queueBody');
-    const queueTable = document.getElementById('queueTable');
-    const queueEmpty = document.getElementById('queueEmpty');
-    const queueCount = document.getElementById('queueCount');
-    const resetQueueBtn = document.getElementById('resetQueueBtn');
-
-    // ─── Load Config ───────────────────────────────────────
-    async function loadConfig() {
-      try {
-        const res = await fetch('/api/code/config');
-        const data = await res.json();
-        if (data.success && data.waNumber) {
-          waNumber = data.waNumber;
-        }
-      } catch (err) {
-        console.error('Failed to load config:', err);
-      }
-    }
-
-    // ─── Fetch Today's Code ────────────────────────────────
-    async function loadTodayCode() {
-      try {
-        const res = await fetch('/api/code/today');
-
-        if (res.status === 401) {
-          window.location.href = '/login.html';
-          return;
-        }
-
-        const data = await res.json();
-
-        if (data.success) {
-          codeDate.textContent = data.date;
-          codeDisplay.textContent = data.code;
-
-          // Generate QR — WhatsApp deep link with pre-filled passcode
-          qrLoading.style.display = 'none';
-          qrCanvas.style.display = 'block';
-
-          const qrContent = waNumber
-            ? `https://wa.me/${waNumber}?text=${encodeURIComponent(data.code)}`
-            : data.code;
-
-          QRCode.toCanvas(qrCanvas, qrContent, {
-            width: 200,
-            margin: 0,
-            color: {
-              dark: '#1a1a2e',
-              light: '#ffffff',
-            },
-            errorCorrectionLevel: 'H',
-          });
-        }
-      } catch (err) {
-        console.error('Failed to load code:', err);
-        showToast('Failed to load today\'s code', 'error');
-      }
-    }
-
-    // ─── Load Queue ────────────────────────────────────────
-    async function loadQueue() {
-      try {
-        const res = await fetch('/api/code/queue');
-
-        if (res.status === 401) {
-          window.location.href = '/login.html';
-          return;
-        }
-
-        const data = await res.json();
-
-        if (data.success) {
-          const tokens = data.tokens || [];
-          const total = data.total || 0;
-
-          // Update counter
-          queueCount.querySelector('.queue-stat-number').textContent = total;
-
-          if (total === 0) {
-            queueEmpty.style.display = 'flex';
-            queueTable.style.display = 'none';
-          } else {
-            queueEmpty.style.display = 'none';
-            queueTable.style.display = 'table';
-
-            queueBody.innerHTML = '';
-            tokens.forEach((t) => {
-              const tr = document.createElement('tr');
-
-              const tdToken = document.createElement('td');
-              tdToken.innerHTML = `<span class="token-badge">#${t.token}</span>`;
-
-              const tdPhone = document.createElement('td');
-              // Mask phone number for privacy: show last 4 digits
-              const masked = t.phone.length > 4
-                ? '•••• ' + t.phone.slice(-4)
-                : t.phone;
-              tdPhone.textContent = masked;
-
-              const tdTime = document.createElement('td');
-              if (t.issuedAt) {
-                const d = new Date(t.issuedAt);
-                tdTime.textContent = d.toLocaleTimeString('en-IN', {
-                  hour: '2-digit',
-                  minute: '2-digit',
-                  hour12: true,
-                  timeZone: 'Asia/Kolkata',
-                });
-              } else {
-                tdTime.textContent = '—';
-              }
-
-              tr.appendChild(tdToken);
-              tr.appendChild(tdPhone);
-              tr.appendChild(tdTime);
-              queueBody.appendChild(tr);
-            });
-          }
-        }
-      } catch (err) {
-        console.error('Failed to load queue:', err);
-      }
-    }
-
-    // ─── Load History ──────────────────────────────────────
-    async function loadHistory() {
-      try {
-        const res = await fetch('/api/code/history');
-
-        if (res.status === 401) {
-          window.location.href = '/login.html';
-          return;
-        }
-
-        const data = await res.json();
-
-        if (data.success && data.history) {
-          historyList.innerHTML = '';
-
-          data.history.forEach((item, index) => {
-            const li = document.createElement('li');
-            li.className = 'history-item' + (index === 0 ? ' today' : '');
-
-            const dateSpan = document.createElement('span');
-            dateSpan.className = 'history-date';
-            dateSpan.textContent = item.date;
-
-            const codeContainer = document.createElement('span');
-
-            if (item.code) {
-              const codeSpan = document.createElement('span');
-              codeSpan.className = 'history-code';
-              codeSpan.textContent = item.code;
-              codeContainer.appendChild(codeSpan);
-            } else {
-              const noCode = document.createElement('span');
-              noCode.className = 'history-code no-code';
-              noCode.textContent = 'No code';
-              codeContainer.appendChild(noCode);
-            }
-
-            if (index === 0) {
-              const badge = document.createElement('span');
-              badge.className = 'history-badge';
-              badge.textContent = 'Today';
-              codeContainer.appendChild(badge);
-            }
-
-            li.appendChild(dateSpan);
-            li.appendChild(codeContainer);
-            historyList.appendChild(li);
-          });
-        }
-      } catch (err) {
-        console.error('Failed to load history:', err);
-      }
-    }
-
-    // ─── Reset Queue ───────────────────────────────────────
-    resetQueueBtn.addEventListener('click', async () => {
-      if (!confirm('Reset the entire queue for today? This cannot be undone.')) {
-        return;
-      }
-
-      resetQueueBtn.disabled = true;
-      resetQueueBtn.textContent = '⏳ Resetting...';
-
-      try {
-        const res = await fetch('/api/code/queue/reset', { method: 'POST' });
-
-        if (res.status === 401) {
-          window.location.href = '/login.html';
-          return;
-        }
-
-        const data = await res.json();
-
-        if (data.success) {
-          showToast('Queue reset!', 'success');
-          await loadQueue();
-        } else {
-          showToast('Failed to reset queue', 'error');
-        }
-      } catch (err) {
-        showToast('Network error', 'error');
-      } finally {
-        resetQueueBtn.disabled = false;
-        resetQueueBtn.textContent = '🗑️ Reset Queue';
-      }
-    });
-
-    // ─── Refresh ───────────────────────────────────────────
-    refreshBtn.addEventListener('click', async () => {
-      refreshBtn.disabled = true;
-      await loadTodayCode();
-      await loadHistory();
-      await loadQueue();
-      refreshBtn.disabled = false;
-      showToast('Refreshed!', 'success');
-    });
-
-    // ─── Copy Code (tap to select + native copy menu) ──────
-    codeDisplay.addEventListener('click', () => {
-      const code = codeDisplay.textContent;
-      if (!code || code === '------') return;
-
-      // Step 1: Try modern clipboard API
-      if (navigator.clipboard && window.isSecureContext) {
-        navigator.clipboard.writeText(code).then(() => {
-          showToast('Code copied to clipboard!', 'success');
-        }).catch(() => {
-          selectTextNatively();
-        });
-        return;
-      }
-
-      // Step 2: Select the text natively — mobile will show copy menu
-      selectTextNatively();
-    });
-    codeDisplay.style.cursor = 'pointer';
-
-    function selectTextNatively() {
-      const range = document.createRange();
-      range.selectNodeContents(codeDisplay);
-      const selection = window.getSelection();
-      selection.removeAllRanges();
-      selection.addRange(range);
-      showToast('Text selected — tap "Copy" from the menu', 'success');
-    }
-
-    // ─── Logout ────────────────────────────────────────────
-    logoutBtn.addEventListener('click', async () => {
-      try {
-        await fetch('/api/auth/logout', { method: 'POST' });
-      } catch (e) { /* ignore */ }
-      window.location.href = '/login.html';
-    });
-
-    // ─── Toast Helper ──────────────────────────────────────
-    function showToast(message, type = 'success') {
-      toast.textContent = message;
-      toast.className = `toast toast-${type} show`;
-
-      setTimeout(() => {
-        toast.classList.remove('show');
-      }, 3000);
-    }
-  </script>
+  <script src="/js/dashboard.js"></script>
 </body>
 
 </html>

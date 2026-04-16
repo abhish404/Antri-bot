@@ -1,15 +1,18 @@
 // routes/api.js
 // ─────────────────────────────────────────────────────────
 // Protected API routes for daily code + queue operations.
+//
+// QR routes: requireAuth (any admin)
+// Dashboard routes: requireDashboardAuth (dashboard role only)
 // ─────────────────────────────────────────────────────────
 
 const express = require('express');
 const router = express.Router();
-const { requireAuth } = require('../middleware/auth');
+const { requireAuth, requireDashboardAuth } = require('../middleware/auth');
 const { getTodayCode, rotateCode, getCodeHistory } = require('../services/dailyCode');
-const { getTodayQueue, resetQueue } = require('../services/tokenQueue');
+const { getTodayQueue, resetQueue, markTreated, markUntreated } = require('../services/tokenQueue');
 
-// All routes in this router require authentication
+// All routes in this router require at least basic authentication
 router.use(requireAuth);
 
 /**
@@ -73,7 +76,7 @@ router.get('/queue', async (req, res) => {
  * POST /api/code/queue/reset
  * Resets today's queue (admin action).
  */
-router.post('/queue/reset', async (req, res) => {
+router.post('/queue/reset', requireDashboardAuth, async (req, res) => {
   try {
     const result = await resetQueue();
     console.log(`[API] 🔄 Admin reset the queue`);
@@ -81,6 +84,47 @@ router.post('/queue/reset', async (req, res) => {
   } catch (error) {
     console.error('[API] Error resetting queue:', error.message);
     return res.status(500).json({ error: 'Failed to reset queue.' });
+  }
+});
+
+/**
+ * POST /api/code/queue/treat
+ * Mark a token as treated.
+ * Body: { phone }
+ */
+router.post('/queue/treat', requireDashboardAuth, async (req, res) => {
+  try {
+    const { phone } = req.body;
+    if (!phone) {
+      return res.status(400).json({ error: 'Phone number is required.' });
+    }
+    const result = await markTreated(phone);
+    return res.json({ success: true, ...result });
+  } catch (error) {
+    console.error('[API] Error treating token:', error.message);
+    return res.status(500).json({ error: error.message || 'Failed to treat token.' });
+  }
+});
+
+/**
+ * POST /api/code/queue/untreat
+ * Revert a treated token back to waiting.
+ * Body: { phone, reason }
+ */
+router.post('/queue/untreat', requireDashboardAuth, async (req, res) => {
+  try {
+    const { phone, reason } = req.body;
+    if (!phone) {
+      return res.status(400).json({ error: 'Phone number is required.' });
+    }
+    if (!reason || !reason.trim()) {
+      return res.status(400).json({ error: 'Reason is required for retrieval.' });
+    }
+    const result = await markUntreated(phone, reason.trim());
+    return res.json({ success: true, ...result });
+  } catch (error) {
+    console.error('[API] Error untreating token:', error.message);
+    return res.status(500).json({ error: error.message || 'Failed to untreat token.' });
   }
 });
 

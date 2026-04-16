@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="Venue QR code display — daily access code">
+  <title>QR Panel — Daily Code</title>
+  <link rel="stylesheet" href="/css/styles.css">
+  <link rel="icon"
+    href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📱</text></svg>">
+  <script src="https://cdn.jsdelivr.net/npm/qrcode/build/qrcode.min.js"></script>
+</head>
+
+<body>
+  <div class="container dashboard">
+
+    <!-- ─── Top Bar ──────────────────────────────────── -->
+    <header class="topbar">
+      <div class="topbar-brand">
+        <div class="topbar-logo">📱</div>
+        <span class="topbar-title">QR Panel</span>
+      </div>
+      <div class="topbar-actions">
+        <button class="btn btn-danger" id="logoutBtn">Logout</button>
+      </div>
+    </header>
+
+    <!-- ─── Main Content ─────────────────────────────── -->
+    <main class="main">
+
+      <!-- Code Card (QR only) -->
+      <section class="code-card" id="codeCard">
+        <p class="code-date" id="codeDate">Loading...</p>
+        <h1 class="code-heading">Today's Access Code</h1>
+
+        <div class="qr-wrapper" id="qrWrapper">
+          <div class="qr-loading" id="qrLoading">
+            <div class="spinner"></div>
+          </div>
+          <canvas id="qrCanvas" style="display:none;"></canvas>
+        </div>
+
+        <p class="code-display" id="codeDisplay">------</p>
+        <p class="code-hint">Scan QR → opens WhatsApp with passcode pre-filled</p>
+
+        <div class="code-actions">
+          <button class="btn btn-secondary" id="copyCodeBtn">📋 Copy Code</button>
+        </div>
+      </section>
+
+      <!-- Code History -->
+      <section class="history-card" id="historyCard">
+        <h2 class="history-title">📋 Code History (Last 7 Days)</h2>
+        <ul class="history-list" id="historyList">
+          <li class="history-item">
+            <span class="history-date">Loading...</span>
+          </li>
+        </ul>
+      </section>
+
+    </main>
+  </div>
+
+  <!-- Toast -->
+  <div class="toast" id="toast"></div>
+
+  <script>
+    // ─── State ─────────────────────────────────────────────
+    let waNumber = '';
+
+    // ─── Auth Guard ────────────────────────────────────────
+    (async () => {
+      try {
+        const res = await fetch('/api/auth/check');
+        const data = await res.json();
+        if (!data.authenticated) {
+          window.location.href = '/login.html';
+          return;
+        }
+      } catch (e) {
+        window.location.href = '/login.html';
+        return;
+      }
+
+      // Load config then code
+      await loadConfig();
+      await loadTodayCode();
+      await loadHistory();
+    })();
+
+    // ─── DOM References ────────────────────────────────────
+    const codeDate = document.getElementById('codeDate');
+    const codeDisplay = document.getElementById('codeDisplay');
+    const qrCanvas = document.getElementById('qrCanvas');
+    const qrLoading = document.getElementById('qrLoading');
+    const logoutBtn = document.getElementById('logoutBtn');
+    const copyCodeBtn = document.getElementById('copyCodeBtn');
+    const historyList = document.getElementById('historyList');
+    const toast = document.getElementById('toast');
+
+    // ─── Load Config ───────────────────────────────────────
+    async function loadConfig() {
+      try {
+        const res = await fetch('/api/code/config');
+        const data = await res.json();
+        if (data.success && data.waNumber) {
+          waNumber = data.waNumber;
+        }
+      } catch (err) {
+        console.error('Failed to load config:', err);
+      }
+    }
+
+    // ─── Fetch Today's Code ────────────────────────────────
+    async function loadTodayCode() {
+      try {
+        const res = await fetch('/api/code/today');
+
+        if (res.status === 401) {
+          window.location.href = '/login.html';
+          return;
+        }
+
+        const data = await res.json();
+
+        if (data.success) {
+          codeDate.textContent = data.date;
+          codeDisplay.textContent = data.code;
+
+          // Generate QR
+          qrLoading.style.display = 'none';
+          qrCanvas.style.display = 'block';
+
+          const qrContent = waNumber
+            ? `https://wa.me/${waNumber}?text=${encodeURIComponent(data.code)}`
+            : data.code;
+
+          QRCode.toCanvas(qrCanvas, qrContent, {
+            width: 200,
+            margin: 0,
+            color: {
+              dark: '#1a1a2e',
+              light: '#ffffff',
+            },
+            errorCorrectionLevel: 'H',
+          });
+        }
+      } catch (err) {
+        console.error('Failed to load code:', err);
+        showToast('Failed to load today\'s code', 'error');
+      }
+    }
+
+    // ─── Load History ──────────────────────────────────────
+    async function loadHistory() {
+      try {
+        const res = await fetch('/api/code/history');
+        if (res.status === 401) return;
+        const data = await res.json();
+
+        if (data.success && data.history) {
+          historyList.innerHTML = '';
+
+          data.history.forEach((item, index) => {
+            const li = document.createElement('li');
+            li.className = 'history-item' + (index === 0 ? ' today' : '');
+
+            const dateSpan = document.createElement('span');
+            dateSpan.className = 'history-date';
+            dateSpan.textContent = item.date;
+
+            const codeContainer = document.createElement('span');
+
+            if (item.code) {
+              const codeSpan = document.createElement('span');
+              codeSpan.className = 'history-code';
+              codeSpan.textContent = item.code;
+              codeContainer.appendChild(codeSpan);
+            } else {
+              const noCode = document.createElement('span');
+              noCode.className = 'history-code no-code';
+              noCode.textContent = 'No code';
+              codeContainer.appendChild(noCode);
+            }
+
+            if (index === 0) {
+              const badge = document.createElement('span');
+              badge.className = 'history-badge';
+              badge.textContent = 'Today';
+              codeContainer.appendChild(badge);
+            }
+
+            li.appendChild(dateSpan);
+            li.appendChild(codeContainer);
+            historyList.appendChild(li);
+          });
+        }
+      } catch (err) {
+        console.error('Failed to load history:', err);
+      }
+    }
+
+    // ─── Copy Code ─────────────────────────────────────────
+    copyCodeBtn.addEventListener('click', () => {
+      const code = codeDisplay.textContent;
+      if (!code || code === '------') return;
+
+      if (navigator.clipboard && window.isSecureContext) {
+        navigator.clipboard.writeText(code).then(() => {
+          showToast('Code copied to clipboard!', 'success');
+        }).catch(() => {
+          selectTextNatively();
+        });
+        return;
+      }
+
+      selectTextNatively();
+    });
+
+    function selectTextNatively() {
+      const range = document.createRange();
+      range.selectNodeContents(codeDisplay);
+      const selection = window.getSelection();
+      selection.removeAllRanges();
+      selection.addRange(range);
+      showToast('Text selected — tap "Copy" from the menu', 'success');
+    }
+
+    // ─── Logout ────────────────────────────────────────────
+    logoutBtn.addEventListener('click', async () => {
+      try {
+        await fetch('/api/auth/logout', { method: 'POST' });
+      } catch (e) { /* ignore */ }
+      window.location.href = '/login.html';
+    });
+
+    // ─── Toast Helper ──────────────────────────────────────
+    function showToast(message, type = 'success') {
+      toast.textContent = message;
+      toast.className = `toast toast-${type} show`;
+
+      setTimeout(() => {
+        toast.classList.remove('show');
+      }, 3000);
+    }
+  </script>
+</body>
+
+</html>

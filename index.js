@@ -13,6 +13,7 @@ const express = require('express');
 const session = require('express-session');
 const cron = require('node-cron');
 const { getTodayCode, rotateCode } = require('./services/dailyCode');
+const { connectMongoDB } = require('./config/mongodb');
 
 // ─── Express App Setup ───────────────────────────────────
 const app = express();
@@ -84,6 +85,13 @@ const task = cron.schedule(
     console.log(`[Startup] ✅ Today's code (${date}): ${code}`);
   } catch (error) {
     console.error(`[Startup] ❌ Failed to get/create today's code:`, error.message);
+  }
+
+  // Connect MongoDB (optional — dashboard features)
+  try {
+    await connectMongoDB();
+  } catch (error) {
+    console.error(`[Startup] ⚠️ MongoDB not available — dashboard will work without customer names`);
   }
 
   // Start Express server

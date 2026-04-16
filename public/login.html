@@ -61,7 +61,12 @@
         const res = await fetch('/api/auth/check');
         const data = await res.json();
         if (data.authenticated) {
-          window.location.href = '/dashboard.html';
+          // Redirect based on role
+          if (data.role === 'dashboard') {
+            window.location.href = '/dashboard.html';
+          } else {
+            window.location.href = '/qr.html';
+          }
         }
       } catch (e) { /* ignore */ }
     })();
@@ -100,7 +105,12 @@
         const data = await res.json();
 
         if (res.ok && data.success) {
-          window.location.href = '/dashboard.html';
+          // Redirect based on role
+          if (data.role === 'dashboard') {
+            window.location.href = '/dashboard.html';
+          } else {
+            window.location.href = '/qr.html';
+          }
         } else {
           showError(data.error || 'Login failed.');
         }
