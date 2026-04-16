@@ -5,16 +5,34 @@
 // GET  /webhook  → Meta webhook verification (hub challenge)
 // POST /webhook  → Incoming messages from WhatsApp users
 //
-// Flow: user sends passcode → validate → assign queue token
+// Flow: user sends passcode → token reserved → ask name →
+//       save to MongoDB → reveal token number
 // ─────────────────────────────────────────────────────────
 
 const express = require('express');
 const router = express.Router();
 const { validateCode } = require('../services/dailyCode');
-const { getNextToken } = require('../services/tokenQueue');
+const { getNextToken, getExistingToken, saveCustomer } = require('../services/tokenQueue');
 const { sendMessage } = require('../services/whatsapp');
 
 const VERIFY_TOKEN = process.env.VERIFY_TOKEN;
+
+// ─── Conversation State ─────────────────────────────────
+// Tracks users who have verified passcode but haven't provided name yet.
+// Key: phone number, Value: { state, token, timestamp }
+const conversationState = new Map();
+
+// Auto-clear stale states after 10 minutes
+const STATE_TTL_MS = 10 * 60 * 1000;
+setInterval(() => {
+  const now = Date.now();
+  for (const [phone, data] of conversationState) {
+    if (now - data.timestamp > STATE_TTL_MS) {
+      conversationState.delete(phone);
+      console.log(`[Webhook] 🧹 Cleared stale state for ${phone}`);
+    }
+  }
+}, 60 * 1000);
 
 // ─── Webhook Verification (GET) ──────────────────────────
 // Meta sends a GET request to verify the webhook URL.
@@ -62,42 +80,75 @@ router.post('/', async (req, res) => {
 
     // Only handle text messages
     if (msgType !== 'text') {
-      await sendMessage(from, '⚠️ Please send the passcode as a text message.');
+      await sendMessage(from, '⚠️ Please send a text message.');
       return;
     }
 
     const userInput = message.text.body.trim();
     console.log(`[Webhook] 📝 User input: "${userInput}"`);
 
-    // Validate the passcode against today's code
+    // ─── Step 2: User is providing their name ────────────
+    if (conversationState.has(from)) {
+      const name = userInput;
+
+      if (name.length < 2 || name.length > 50) {
+        await sendMessage(from, '⚠️ Please enter a valid name (2–50 characters).');
+        return;
+      }
+
+      const { token } = conversationState.get(from);
+      console.log(`[Webhook] 📛 Name received from ${from}: "${name}"`);
+      conversationState.delete(from);
+
+      // Save customer data to MongoDB
+      await saveCustomer(from, name, token);
+
+      console.log(`[Webhook] 🎫 Token #${token} revealed to ${name} (${from})`);
+      await sendMessage(
+        from,
+        `✅ *Welcome, ${name}!*\n\n` +
+        `🎫 Your token number is *#${token}*\n\n` +
+        `Please wait for your number to be called.\n\n` +
+        `_Thank you for your patience! 🙏_`
+      );
+      return;
+    }
+
+    // ─── Step 1: Validate the passcode ───────────────────
     const { valid, code } = await validateCode(userInput);
 
     if (valid) {
       console.log(`[Webhook] ✅ Passcode verified for ${from}`);
 
-      // Assign a queue token
-      const { token, isNew, total } = await getNextToken(from);
-
-      if (isNew) {
-        console.log(`[Webhook] 🎫 New token #${token} issued to ${from} (total: ${total})`);
-        await sendMessage(
-          from,
-          `✅ *Passcode Verified!*\n\n` +
-          `🎫 Your token number is *#${token}*\n\n` +
-          `You are number *${token}* in the queue.\n` +
-          `Please wait for your number to be called.\n\n` +
-          `_Thank you for your patience! 🙏_`
-        );
-      } else {
-        console.log(`[Webhook] 🔄 Existing token #${token} returned to ${from}`);
+      // Check if user already has a token today (in MongoDB)
+      const existing = await getExistingToken(from);
+      if (existing) {
+        console.log(`[Webhook] 🔄 Existing token #${existing.token} returned to ${from}`);
         await sendMessage(
           from,
           `ℹ️ *You already have a token!*\n\n` +
-          `🎫 Your token number is *#${token}*\n\n` +
+          `🎫 Your token number is *#${existing.token}*\n\n` +
           `Please wait for your number to be called.\n\n` +
           `_Thank you for your patience! 🙏_`
         );
+        return;
       }
+
+      // Reserve a token number atomically (Firestore counter)
+      const { token } = await getNextToken(from);
+
+      // Set state to awaiting name — token is reserved but not revealed
+      conversationState.set(from, {
+        state: 'awaiting_name',
+        token,
+        timestamp: Date.now(),
+      });
+
+      await sendMessage(
+        from,
+        `✅ *Passcode Verified!*\n\n` +
+        `📝 Please reply with your *full name* to receive your queue token.`
+      );
     } else {
       console.log(`[Webhook] ❌ Invalid passcode from ${from}: "${userInput}"`);
       await sendMessage(

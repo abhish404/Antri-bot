@@ -19,7 +19,10 @@
 const admin = require('firebase-admin');
 
 
-const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
+const rawCreds = process.env.FIREBASE_SERVICE_ACCOUNT;
+const serviceAccount = (rawCreds && rawCreds !== 'undefined' && rawCreds.trim().startsWith('{'))
+    ? JSON.parse(rawCreds)
+    : require('../antri-asia-firebase.json');
 
 admin.initializeApp({
     credential: admin.credential.cert(serviceAccount),

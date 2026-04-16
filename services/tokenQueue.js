@@ -1,138 +1,162 @@
 // services/tokenQueue.js
 // ─────────────────────────────────────────────────────────
-// Daily token queue backed by Firestore.
+// Hybrid token queue: Firestore atomic counter + MongoDB user records.
 //
-// Each day gets its own document in `queue_tokens` with:
-//   - nextToken: atomic counter (starts at 1)
-//   - tokens[]: array of { phone, token, issuedAt, name?, status }
+// Firestore handles:
+//   - Atomic token numbering (nextToken counter per day)
+//
+// MongoDB handles:
+//   - Full user records (name, phone, token, status, etc.)
+//   - Dashboard queries (queue list, treat/untreat)
 //
 // Exports:
-//   getNextToken(phone) — idempotent: same phone → same token per day
-//   getTodayQueue()     — returns all tokens issued today
-//   resetQueue()        — clears today's queue (admin action)
-//   markTreated(phone)  — set token status to 'treated'
-//   markUntreated(phone, reason) — revert status, log reason
+//   getNextToken(phone)              — reserve next token number (Firestore)
+//   getExistingToken(phone)          — check if phone has a token today (MongoDB)
+//   saveCustomer(phone, name, token) — save user record after name collected (MongoDB)
+//   getTodayQueue()                  — all tokens issued today (MongoDB)
+//   resetQueue()                     — clear today's queue (both)
+//   markTreated(phone)               — set status to 'treated' (MongoDB)
+//   markUntreated(phone, reason)     — revert status to 'waiting' (MongoDB)
 // ─────────────────────────────────────────────────────────
 
 const admin = require('firebase-admin');
 const { db } = require('../config/firebase');
 const { getTodate } = require('../utils/dateHelpers');
+const Customer = require('../models/Customer');
 
 const COLLECTION = 'queue_tokens';
 
+// ─── Firestore: Atomic Token Counter ─────────────────────
+
 /**
- * Returns the next token for a phone number.
- * If the phone already has a token today, returns the existing one (idempotent).
+ * Reserves the next token number for a phone number.
+ * Uses a Firestore transaction for atomic incrementing.
+ * Does NOT check MongoDB — the webhook handles idempotency.
  *
- * @param {string} phone - Sender's phone number (with country code, no +)
- * @returns {Promise<{ token: number, isNew: boolean, total: number }>}
+ * @param {string} phone - Sender's phone number
+ * @returns {Promise<{ token: number }>}
  */
 async function getNextToken(phone) {
   const today = getTodate();
   const docRef = db.collection(COLLECTION).doc(today);
 
-  // Use a Firestore transaction for atomicity
   return db.runTransaction(async (txn) => {
     const doc = await txn.get(docRef);
 
     if (doc.exists) {
       const data = doc.data();
-      const tokens = data.tokens || [];
-
-      // Check if this phone already has a token today
-      const existing = tokens.find((t) => t.phone === phone);
-      if (existing) {
-        return {
-          token: existing.token,
-          isNew: false,
-          total: tokens.length,
-        };
-      }
-
-      // Assign next token
-      const nextToken = data.nextToken || tokens.length + 1;
-      const entry = {
-        phone,
-        token: nextToken,
-        issuedAt: new Date().toISOString(),
-        status: 'waiting',
-      };
+      const nextToken = data.nextToken || 1;
 
       txn.update(docRef, {
         nextToken: nextToken + 1,
-        tokens: admin.firestore.FieldValue.arrayUnion(entry),
       });
 
-      return {
-        token: nextToken,
-        isNew: true,
-        total: tokens.length + 1,
-      };
+      return { token: nextToken };
     }
 
-    // First token of the day — create the document
-    const entry = {
-      phone,
-      token: 1,
-      issuedAt: new Date().toISOString(),
-      status: 'waiting',
-    };
-
+    // First token of the day — create the counter document
     txn.set(docRef, {
       date: today,
       nextToken: 2,
-      tokens: [entry],
       createdAt: admin.firestore.FieldValue.serverTimestamp(),
     });
 
-    return {
-      token: 1,
-      isNew: true,
-      total: 1,
-    };
+    return { token: 1 };
   });
 }
 
+// ─── MongoDB: User Records ──────────────────────────────
+
 /**
- * Returns today's full queue.
+ * Checks if a phone number already has a token today.
+ *
+ * @param {string} phone - Sender's phone number
+ * @returns {Promise<{ token: number, name: string } | null>}
+ */
+async function getExistingToken(phone) {
+  const today = getTodate();
+  const existing = await Customer.findOne({ date: today, phone }).lean();
+  return existing || null;
+}
+
+/**
+ * Saves a customer record to MongoDB after name is collected.
+ *
+ * @param {string} phone - Sender's phone number
+ * @param {string} name - User's full name
+ * @param {number} token - Reserved token number
+ * @returns {Promise<Object>} - The saved customer document
+ */
+async function saveCustomer(phone, name, token) {
+  const today = getTodate();
+
+  const customer = await Customer.findOneAndUpdate(
+    { date: today, phone },
+    {
+      $setOnInsert: {
+        name,
+        token,
+        date: today,
+        phone,
+        issuedAt: new Date(),
+        status: 'waiting',
+      },
+    },
+    { upsert: true, new: true }
+  );
+
+  console.log(`[TokenQueue] 💾 Customer saved: ${name} (${phone}) → Token #${token}`);
+  return customer;
+}
+
+/**
+ * Returns today's full queue from MongoDB.
  *
  * @returns {Promise<{ date: string, tokens: Array, total: number }>}
  */
 async function getTodayQueue() {
   const today = getTodate();
-  const doc = await db.collection(COLLECTION).doc(today).get();
-
-  if (!doc.exists) {
-    return { date: today, tokens: [], total: 0 };
-  }
-
-  const data = doc.data();
-  const tokens = data.tokens || [];
+  const tokens = await Customer.find({ date: today })
+    .sort({ token: 1 })
+    .lean();
 
   return {
     date: today,
-    tokens: tokens.sort((a, b) => a.token - b.token),
+    tokens: tokens.map((t) => ({
+      phone: t.phone,
+      name: t.name,
+      token: t.token,
+      issuedAt: t.issuedAt,
+      status: t.status,
+      treatedAt: t.treatedAt || null,
+      retrieveReason: t.retrieveReason || null,
+      retrievedAt: t.retrievedAt || null,
+    })),
     total: tokens.length,
   };
 }
 
 /**
  * Resets today's queue (admin action).
+ * Clears both the Firestore counter and MongoDB records.
  *
  * @returns {Promise<{ date: string, message: string }>}
  */
 async function resetQueue() {
   const today = getTodate();
-  const docRef = db.collection(COLLECTION).doc(today);
 
+  // Reset Firestore counter
+  const docRef = db.collection(COLLECTION).doc(today);
   await docRef.set({
     date: today,
     nextToken: 1,
-    tokens: [],
     createdAt: admin.firestore.FieldValue.serverTimestamp(),
   });
 
-  console.log(`[TokenQueue] 🔄 Queue reset for ${today}`);
+  // Delete all MongoDB records for today
+  const result = await Customer.deleteMany({ date: today });
+
+  console.log(`[TokenQueue] 🔄 Queue reset for ${today} (${result.deletedCount} records removed)`);
   return { date: today, message: 'Queue reset successfully' };
 }
 
@@ -144,31 +168,19 @@ async function resetQueue() {
  */
 async function markTreated(phone) {
   const today = getTodate();
-  const docRef = db.collection(COLLECTION).doc(today);
 
-  return db.runTransaction(async (txn) => {
-    const doc = await txn.get(docRef);
+  const customer = await Customer.findOneAndUpdate(
+    { date: today, phone },
+    { status: 'treated', treatedAt: new Date() },
+    { new: true }
+  );
 
-    if (!doc.exists) {
-      throw new Error('No queue found for today');
-    }
+  if (!customer) {
+    throw new Error('Token not found for this phone number');
+  }
 
-    const data = doc.data();
-    const tokens = data.tokens || [];
-    const index = tokens.findIndex((t) => t.phone === phone);
-
-    if (index === -1) {
-      throw new Error('Token not found for this phone number');
-    }
-
-    tokens[index].status = 'treated';
-    tokens[index].treatedAt = new Date().toISOString();
-
-    txn.update(docRef, { tokens });
-
-    console.log(`[TokenQueue] ✅ Token #${tokens[index].token} marked as treated`);
-    return { success: true, token: tokens[index].token };
-  });
+  console.log(`[TokenQueue] ✅ Token #${customer.token} marked as treated`);
+  return { success: true, token: customer.token };
 }
 
 /**
@@ -180,33 +192,32 @@ async function markTreated(phone) {
  */
 async function markUntreated(phone, reason) {
   const today = getTodate();
-  const docRef = db.collection(COLLECTION).doc(today);
 
-  return db.runTransaction(async (txn) => {
-    const doc = await txn.get(docRef);
+  const customer = await Customer.findOneAndUpdate(
+    { date: today, phone },
+    {
+      status: 'waiting',
+      treatedAt: null,
+      retrieveReason: reason,
+      retrievedAt: new Date(),
+    },
+    { new: true }
+  );
 
-    if (!doc.exists) {
-      throw new Error('No queue found for today');
-    }
+  if (!customer) {
+    throw new Error('Token not found for this phone number');
+  }
 
-    const data = doc.data();
-    const tokens = data.tokens || [];
-    const index = tokens.findIndex((t) => t.phone === phone);
-
-    if (index === -1) {
-      throw new Error('Token not found for this phone number');
-    }
-
-    tokens[index].status = 'waiting';
-    tokens[index].treatedAt = null;
-    tokens[index].retrieveReason = reason;
-    tokens[index].retrievedAt = new Date().toISOString();
-
-    txn.update(docRef, { tokens });
-
-    console.log(`[TokenQueue] ↩️ Token #${tokens[index].token} reverted to waiting. Reason: ${reason}`);
-    return { success: true, token: tokens[index].token };
-  });
+  console.log(`[TokenQueue] ↩️ Token #${customer.token} reverted to waiting. Reason: ${reason}`);
+  return { success: true, token: customer.token };
 }
 
-module.exports = { getNextToken, getTodayQueue, resetQueue, markTreated, markUntreated };
+module.exports = {
+  getNextToken,
+  getExistingToken,
+  saveCustomer,
+  getTodayQueue,
+  resetQueue,
+  markTreated,
+  markUntreated,
+};

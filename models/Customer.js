@@ -1,9 +1,10 @@
 // models/Customer.js
 // ─────────────────────────────────────────────────────────
-// MongoDB model for customer data.
+// MongoDB model for customer token data.
 //
-// Stores customer name linked to their phone number.
-// Used by the dashboard to display names instead of raw phones.
+// Stores customer name, phone, token number, and status.
+// Used by the webhook (saves after name collection) and
+// the dashboard (displays queue, treat/untreat actions).
 // ─────────────────────────────────────────────────────────
 
 const { mongoose } = require('../config/mongodb');
@@ -12,7 +13,6 @@ const customerSchema = new mongoose.Schema({
   phone: {
     type: String,
     required: true,
-    unique: true,
     index: true,
   },
   name: {
@@ -20,21 +20,43 @@ const customerSchema = new mongoose.Schema({
     required: true,
     trim: true,
   },
-  createdAt: {
+  token: {
+    type: Number,
+    required: true,
+  },
+  date: {
+    type: String,
+    required: true,
+    index: true,
+  },
+  issuedAt: {
     type: Date,
     default: Date.now,
   },
-  updatedAt: {
+  status: {
+    type: String,
+    default: 'waiting',
+    enum: ['waiting', 'treated'],
+  },
+  treatedAt: {
     type: Date,
-    default: Date.now,
+    default: null,
+  },
+  retrieveReason: {
+    type: String,
+    default: null,
+  },
+  retrievedAt: {
+    type: Date,
+    default: null,
   },
 });
 
-// Update the updatedAt field on save
-customerSchema.pre('save', function (next) {
-  this.updatedAt = new Date();
-  next();
-});
+// One token per phone per day
+customerSchema.index({ date: 1, phone: 1 }, { unique: true });
+
+// Fast queue lookups sorted by token number
+customerSchema.index({ date: 1, token: 1 });
 
 const Customer = mongoose.model('Customer', customerSchema);
 
